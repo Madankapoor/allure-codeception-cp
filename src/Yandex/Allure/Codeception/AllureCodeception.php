@@ -401,7 +401,7 @@ class AllureCodeception extends Extension
     public function stepBefore(StepEvent $stepEvent)
     {
         $argumentsLength = $this->tryGetOption(ARGUMENTS_LENGTH, 200);
-        $step = $e->getStep();
+        $step = $stepEvent->getStep();
         if ($step->getMetaStep()) {
             $rootStepName = $step->getMetaStep()->toString($argumentsLength);
             if (!$this->lastRootStep || $rootStepName !== $this->lastRootStep->getName()) {
