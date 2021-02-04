@@ -401,21 +401,23 @@ class AllureCodeception extends Extension
     public function stepBefore(StepEvent $stepEvent)
     {
         $argumentsLength = $this->tryGetOption(ARGUMENTS_LENGTH, 200);
-
-
-        $stepAction = $stepEvent->getStep() ? $stepEvent->getStep()->getHumanizedActionWithoutArguments() : '';
-        $stepArgs = $stepEvent->getStep() ? $stepEvent->getStep()->getArgumentsAsString($argumentsLength) : '';
-
-        if (!trim($stepAction)) {
-            $stepAction = $stepEvent->getStep() ? $stepEvent->getStep()->getMetaStep()->getHumanizedActionWithoutArguments() : '';
-            $stepArgs = $stepEvent->getStep() ? $stepEvent->getStep()->getMetaStep()->getArgumentsAsString($argumentsLength) : '';
+        $step = $e->getStep();
+        if ($step->getMetaStep()) {
+            $rootStepName = $step->getMetaStep()->toString($argumentsLength);
+            if (!$this->lastRootStep || $rootStepName !== $this->lastRootStep->getName()) {
+                if ($this->lastRootStep && $rootStepName !== $this->lastRootStep->getName()) {
+                    $this->getLifecycle()->fire(new StepFinishedEvent());
+                }
+                $this->getLifecycle()->fire(new StepStartedEvent($rootStepName));
+                $this->lastRootStep = $this->getLifecycle()->getStepStorage()->getLast();
+            }
+        } elseif (!$step->getMetaStep() && $this->lastRootStep) {
+            $this->getLifecycle()->fire(new StepFinishedEvent());
+            $this->lastRootStep = null;
         }
-
-        $stepName = $stepAction . ' ' . $stepArgs;
-
-        $this->emptyStep = false;
+        $stepName = $step->toString($argumentsLength);
         $this->getLifecycle()->fire(new StepStartedEvent($stepName));
-}
+    }
 
     public function stepAfter(StepEvent $stepEvent)
     {
