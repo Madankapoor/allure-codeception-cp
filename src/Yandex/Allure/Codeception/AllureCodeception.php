@@ -407,8 +407,8 @@ class AllureCodeception extends Extension
         $stepArgs = $stepEvent->getStep() ? $stepEvent->getStep()->getArgumentsAsString($argumentsLength) : '';
 
         if (!trim($stepAction)) {
-            $stepAction = $stepEvent->getStep()->getMetaStep()->getHumanizedActionWithoutArguments();
-            $stepArgs = $stepEvent->getStep()->getMetaStep()->getArgumentsAsString($argumentsLength);
+            $stepAction = $stepEvent->getStep() ? $stepEvent->getStep()->getMetaStep()->getHumanizedActionWithoutArguments() : '';
+            $stepArgs = $stepEvent->getStep() ? $stepEvent->getStep()->getMetaStep()->getArgumentsAsString($argumentsLength) : '';
         }
 
         $stepName = $stepAction . ' ' . $stepArgs;
