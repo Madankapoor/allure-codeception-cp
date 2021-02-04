@@ -401,22 +401,24 @@ class AllureCodeception extends Extension
     public function stepBefore(StepEvent $stepEvent)
     {
         $argumentsLength = $this->tryGetOption(ARGUMENTS_LENGTH, 200);
-        $step = $stepEvent->getStep();
-        if ($step->getMetaStep()) {
-            $rootStepName = $step->getMetaStep()->toString($argumentsLength);
-            if (!$this->lastRootStep || $rootStepName !== $this->lastRootStep->getName()) {
-                if ($this->lastRootStep && $rootStepName !== $this->lastRootStep->getName()) {
-                    $this->getLifecycle()->fire(new StepFinishedEvent());
+        if($stepEvent){
+            $step = $stepEvent->getStep();
+            if ($step->getMetaStep()) {
+                $rootStepName = $step->getMetaStep()->toString($argumentsLength);
+                if (!$this->lastRootStep || $rootStepName !== $this->lastRootStep->getName()) {
+                    if ($this->lastRootStep && $rootStepName !== $this->lastRootStep->getName()) {
+                        $this->getLifecycle()->fire(new StepFinishedEvent());
+                    }
+                    $this->getLifecycle()->fire(new StepStartedEvent($rootStepName));
+                    $this->lastRootStep = $this->getLifecycle()->getStepStorage()->getLast();
                 }
-                $this->getLifecycle()->fire(new StepStartedEvent($rootStepName));
-                $this->lastRootStep = $this->getLifecycle()->getStepStorage()->getLast();
+            } elseif (!$step->getMetaStep() && $this->lastRootStep) {
+                $this->getLifecycle()->fire(new StepFinishedEvent());
+                $this->lastRootStep = null;
             }
-        } elseif (!$step->getMetaStep() && $this->lastRootStep) {
-            $this->getLifecycle()->fire(new StepFinishedEvent());
-            $this->lastRootStep = null;
+            $stepName = $step->toString($argumentsLength);
+            $this->getLifecycle()->fire(new StepStartedEvent($stepName));
         }
-        $stepName = $step->toString($argumentsLength);
-        $this->getLifecycle()->fire(new StepStartedEvent($stepName));
     }
 
     public function stepAfter(StepEvent $stepEvent)
