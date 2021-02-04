@@ -1,9 +1,14 @@
 {
-    "name": "madankapoor/allure-codeception-cp",
-    "keywords":["codeception", "testing", "report", "steps", "attachments", "cases", "allure"],
-    "description": "A Fork of the Codeception adapter for Allure report.",
-    "homepage": "http://allure.qatools.ru/",
-    "license": "Apache-2.0",
+    "name": "mkapoor/allure-codeception-custom",
+    "description": "A fork of the Codeception adapater for Allure report",
+    "type": "library",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Madan Kapoor",
+            "email": "madankapoor10@gmail.com"
+        }
+    ],
     "require": {
 	    "php": ">=5.6",
         "codeception/codeception": "^2.3|^3.0|^4.0",
@@ -15,6 +20,5 @@
         "psr-0": {
             "Yandex": "src/"
         }
-    },
-    "version": "1.4.5" 
+    }
 }
