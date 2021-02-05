@@ -57,7 +57,7 @@ const DEFAULT_REPORT_DIRECTORY = 'allure-report';
 const INITIALIZED_PARAMETER = '_initialized';
 
 
-class AllureCodeception2 extends Extension
+class AllureCodeception extends Extension
 {
     use AttachmentSupport;
 
