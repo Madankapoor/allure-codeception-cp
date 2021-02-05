@@ -221,7 +221,7 @@ class AllureCodeception extends Extension
     {
         $suite = $suiteEvent->getSuite();
         $suiteName = $suite->getName();
-        $event = new TestSuiteStartedEvent($suiteName);
+        $event = new TestSuiteStartedEvent($suiteName.implode(',',$suite->getGroups()));
         if (class_exists($suiteName, false)) {
             $annotationManager = new Annotation\AnnotationManager(
                 Annotation\AnnotationProvider::getClassAnnotations($suiteName)
