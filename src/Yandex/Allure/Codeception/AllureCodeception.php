@@ -15,6 +15,7 @@ use Codeception\Test\Cest;
 use Codeception\Test\Gherkin;
 use Codeception\Util\Debug;
 use Codeception\Util\Locator;
+use Ramsey\Uuid\Uuid;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Yandex\Allure\Adapter\Allure;
@@ -221,7 +222,7 @@ class AllureCodeception extends Extension
     {
         $suite = $suiteEvent->getSuite();
         $suiteName = $suite->getName();
-        $event = new TestSuiteStartedEvent($suiteName.implode(',',$suite->getGroups()));
+        $event = new TestSuiteStartedEvent($suiteName . ' ' . Uuid::uuid4()->toString());
         if (class_exists($suiteName, false)) {
             $annotationManager = new Annotation\AnnotationManager(
                 Annotation\AnnotationProvider::getClassAnnotations($suiteName)
