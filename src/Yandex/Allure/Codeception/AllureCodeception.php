@@ -1,4 +1,5 @@
 <?php
+
 namespace Yandex\Allure\Codeception;
 
 use Codeception\Codecept;
@@ -15,18 +16,18 @@ use Codeception\Test\Cest;
 use Codeception\Test\Gherkin;
 use Codeception\Util\Debug;
 use Codeception\Util\Locator;
+use Codeception\Module\ImageDeviationException;
+use Codeception\Step\Comment as CommentStep;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Yandex\Allure\Adapter\Allure;
+use Yandex\Allure\Adapter\Event\AddParameterEvent;
 use Yandex\Allure\Adapter\Annotation;
 use Yandex\Allure\Adapter\Annotation\Description;
 use Yandex\Allure\Adapter\Annotation\Features;
 use Yandex\Allure\Adapter\Annotation\Issues;
 use Yandex\Allure\Adapter\Annotation\Stories;
 use Yandex\Allure\Adapter\Annotation\Title;
-use Yandex\Allure\Adapter\Event\AddAttachmentEvent;
-use Yandex\Allure\Adapter\Event\AddParameterEvent;
-use Yandex\Allure\Adapter\Event\StepFailedEvent;
 use Yandex\Allure\Adapter\Event\StepFinishedEvent;
 use Yandex\Allure\Adapter\Event\StepStartedEvent;
 use Yandex\Allure\Adapter\Event\TestCaseBrokenEvent;
@@ -38,22 +39,28 @@ use Yandex\Allure\Adapter\Event\TestCaseStartedEvent;
 use Yandex\Allure\Adapter\Event\TestSuiteFinishedEvent;
 use Yandex\Allure\Adapter\Event\TestSuiteStartedEvent;
 use Yandex\Allure\Adapter\Model;
-use Yandex\Allure\Adapter\Model\Attachment;
 use Yandex\Allure\Adapter\Model\Label;
 use Yandex\Allure\Adapter\Model\LabelType;
 use Yandex\Allure\Adapter\Model\ParameterKind;
-use function GuzzleHttp\json_encode;
+use Yandex\Allure\Adapter\Model\Status;
+use Yandex\Allure\Adapter\Model\Attachment;
+use Yandex\Allure\Adapter\Support\AttachmentSupport;
 
 const ARGUMENTS_LENGTH = 'arguments_length';
 const OUTPUT_DIRECTORY_PARAMETER = 'outputDirectory';
 const DELETE_PREVIOUS_RESULTS_PARAMETER = 'deletePreviousResults';
+const ENABLED_ATTACH_PARAMETER = 'enabledAttach';
+const STEP_SCREENSHOT_IGNORED_PARAMETER = 'stepScreenshotIgnored';
 const IGNORED_ANNOTATION_PARAMETER = 'ignoredAnnotations';
 const DEFAULT_RESULTS_DIRECTORY = 'allure-results';
 const DEFAULT_REPORT_DIRECTORY = 'allure-report';
 const INITIALIZED_PARAMETER = '_initialized';
 
-class AllureCodeception extends Extension
+
+class AllureCodeception2 extends Extension
 {
+    use AttachmentSupport;
+
     //NOTE: here we implicitly assume that PHP runs in single-threaded mode
     private $uuid;
 
@@ -77,7 +84,7 @@ class AllureCodeception extends Extension
 
     /**
      * Annotations that should be ignored by the annotaions parser (especially PHPUnit annotations).
-     * 
+     *
      * @var array
      */
     private $ignoredAnnotations = [
@@ -86,12 +93,20 @@ class AllureCodeception extends Extension
         'coversDefaultClass', 'coversNothing', 'dataProvider', 'depends', 'expectedException',
         'expectedExceptionCode', 'expectedExceptionMessage', 'group', 'large', 'medium',
         'preserveGlobalState', 'requires', 'runTestsInSeparateProcesses', 'runInSeparateProcess',
-        'small', 'test', 'testdox', 'ticket', 'uses',
+        'small', 'test', 'testdox', 'ticket', 'uses', 'env'
     ];
+
+    private $test;
+    private $testName;
+    private $stepNumber = 1;
+    private $module;
+    private $previousInnerBrowserResponse;
+    private $enabledAttach = [];
+    private $lastRootStep;
 
     /**
      * Extra annotations to ignore in addition to standard PHPUnit annotations.
-     * 
+     *
      * @param array $ignoredAnnotations
      */
     public function _initialize(array $ignoredAnnotations = [])
@@ -110,6 +125,7 @@ class AllureCodeception extends Extension
         if (is_null(Model\Provider::getOutputDirectory())) {
             Model\Provider::setOutputDirectory($outputDirectory);
         }
+        $this->enabledAttach = $this->tryGetOption(ENABLED_ATTACH_PARAMETER, []);
         $this->setOption(INITIALIZED_PARAMETER, true);
     }
 
@@ -135,8 +151,8 @@ class AllureCodeception extends Extension
     /**
      * Retrieves option or returns default value.
      *
-     * @param string $optionKey    Configuration option key.
-     * @param mixed  $defaultValue Value to return in case option isn't set.
+     * @param string $optionKey Configuration option key.
+     * @param mixed $defaultValue Value to return in case option isn't set.
      *
      * @return mixed Option value.
      * @since 0.1.0
@@ -145,7 +161,7 @@ class AllureCodeception extends Extension
     {
         if (array_key_exists($optionKey, $this->config)) {
             return $this->config[$optionKey];
-        } 
+        }
         return $defaultValue;
     }
 
@@ -155,9 +171,9 @@ class AllureCodeception extends Extension
      *
      * @param string $optionKey Configuration option key.
      *
+     * @return mixed Option value.
      * @throws ConfigurationException Thrown if option can't be retrieved.
      *
-     * @return mixed Option value.
      * @since 0.1.0
      */
     private function getOption($optionKey)
@@ -173,11 +189,11 @@ class AllureCodeception extends Extension
     /**
      * Returns output directory.
      *
+     * @return string Absolute path to output directory.
      * @throws ConfigurationException Thrown if there is Codeception-wide
      *                                problem with output directory
      *                                configuration.
      *
-     * @return string Absolute path to output directory.
      * @since 0.1.0
      */
     private function getOutputDirectory()
@@ -198,7 +214,7 @@ class AllureCodeception extends Extension
      * up (if corresponding argument has been set to true).
      *
      * @param string $outputDirectory
-     * @param bool   $deletePreviousResults Whether to delete previous results
+     * @param bool $deletePreviousResults Whether to delete previous results
      *                                      or keep 'em.
      *
      * @since 0.1.0
@@ -206,7 +222,8 @@ class AllureCodeception extends Extension
     private function prepareOutputDirectory(
         $outputDirectory,
         $deletePreviousResults = false
-    ) {
+    )
+    {
         $filesystem = new Filesystem;
         $filesystem->mkdir($outputDirectory, 0775);
         $initialized = $this->tryGetOption(INITIALIZED_PARAMETER, false);
@@ -219,6 +236,15 @@ class AllureCodeception extends Extension
 
     public function suiteBefore(SuiteEvent $suiteEvent)
     {
+        try {
+            if ($this->hasModule('WebDriver')) {
+                $this->module = $this->getModule('WebDriver');
+            } elseif ($this->hasModule('PhpBrowser')) {
+                $this->module = $this->getModule('PhpBrowser');
+            }
+        } catch (\Codeception\Exception\ModuleException $e) {
+            \PHPUnit\Framework\Assert::fail($e->getMessage());
+        }
         $suite = $suiteEvent->getSuite();
         $suiteName = $suite->getName();
         $event = new TestSuiteStartedEvent($suiteName);
@@ -238,20 +264,24 @@ class AllureCodeception extends Extension
     }
 
     private $testInvocations = array();
-    private function buildTestName($test) {
+
+    private function buildTestName($test)
+    {
         $testName = $test->getName();
+        $testFullName = '';
         if ($test instanceof Cest) {
             $testFullName = get_class($test->getTestClass()) . '::' . $testName;
-            if(isset($this->testInvocations[$testFullName])) {
+            $testName = $testFullName;
+            if (isset($this->testInvocations[$testFullName])) {
                 $this->testInvocations[$testFullName]++;
             } else {
                 $this->testInvocations[$testFullName] = 0;
             }
             $currentExample = $test->getMetadata()->getCurrent();
-            if ($currentExample && isset($currentExample['example']) ) {
-                $testName .= ' with data set #' . $this->testInvocations[$testFullName];
+            if ($currentExample && isset($currentExample['example'])) {
+                $testName = $testFullName . ' with data set #' . $this->testInvocations[$testFullName];
             }
-        } else if($test instanceof Gherkin) {
+        } else if ($test instanceof Gherkin) {
             $testName = $test->getMetadata()->getFeature();
         }
         return $testName;
@@ -259,9 +289,30 @@ class AllureCodeception extends Extension
 
     public function testStart(TestEvent $testEvent)
     {
+        if ($this->hasModule('PhpBrowser') && !is_null($this->module->client)) {
+            $this->module->client->getHistory()->clear();
+        }
         $test = $testEvent->getTest();
+        $this->test = $test;
+        $this->testName = $test->getMetadata()->getName();
+
         $testName = $this->buildTestName($test);
-        $event = new TestCaseStartedEvent($this->uuid, $testName);        
+        $title = method_exists($test, 'getFeature') && $test->getFeature() ? mb_strstr($test->getFeature() . "|", "|", true) : $test->getName();
+
+        @$example = $test->getMetadata()->getCurrent('example');
+        if ($example) {
+            @$exampleTitle = $example['wantTo'] ?: $example['setting']['description'];
+            $title = $exampleTitle ?: $title;
+            @$exampleDescription = $example['description'] ?: $example['setting']['long_description'];
+            $description = $exampleDescription ?: false;
+        }
+
+        $event = new TestCaseStartedEvent($this->uuid, $testName);
+        $event->setTitle($title);
+        if (isset($description) && $description) {
+            $description = $description !== strip_tags($description) ? $description : nl2br($description);
+            $event->setDescription(new Model\Description('html', $description));
+        }
         if ($test instanceof Cest) {
             $methodName = $test->getName();
             $className = get_class($test->getTestClass());
@@ -273,7 +324,7 @@ class AllureCodeception extends Extension
             if (class_exists($className, false)) {
                 $annotations = array_merge($annotations, Annotation\AnnotationProvider::getClassAnnotations($className));
             }
-            if (method_exists($className, $test->getName())){
+            if (method_exists($className, $test->getName())) {
                 $annotations = array_merge($annotations, Annotation\AnnotationProvider::getMethodAnnotations($className, $test->getName()));
             }
             $annotationManager = new Annotation\AnnotationManager($annotations);
@@ -282,13 +333,13 @@ class AllureCodeception extends Extension
             $featureTags = $test->getFeatureNode()->getTags();
             $scenarioTags = $test->getScenarioNode()->getTags();
             $event->setLabels(
-                    array_map(
-                            function ($a) {
-                                return new Label($a, LabelType::FEATURE);
-                            },
-                            array_merge($featureTags, $scenarioTags)
-                        )
-                );
+                array_map(
+                    function ($a) {
+                        return new Label($a, LabelType::FEATURE);
+                    },
+                    array_merge($featureTags, $scenarioTags)
+                )
+            );
         } else if ($test instanceof Cept) {
             $annotations = $this->getCeptAnnotations($test);
             if (count($annotations) > 0) {
@@ -315,14 +366,14 @@ class AllureCodeception extends Extension
 
         if ($test instanceof Cest) {
             $currentExample = $test->getMetadata()->getCurrent();
-            if ($currentExample && isset($currentExample['example']) ) {
+            if ($currentExample && isset($currentExample['example'])) {
                 foreach ($currentExample['example'] as $name => $param) {
                     $paramEvent = new AddParameterEvent(
-                            $name, $this->stringifyArgument($param), ParameterKind::ARGUMENT);
+                        $name, $this->stringifyArgument($param), ParameterKind::ARGUMENT);
                     $this->getLifecycle()->fire($paramEvent);
                 }
             }
-        } else if ($test instanceof \PHPUnit_Framework_TestCase) {
+        } else if ($test instanceof \PHPUnit\Framework\TestCase) {
             if ($test->usesDataProvider()) {
                 $method = new \ReflectionMethod(get_class($test), 'getProvidedData');
                 $method->setAccessible(true);
@@ -331,11 +382,11 @@ class AllureCodeception extends Extension
                 foreach ($method->invoke($test) as $key => $param) {
                     $paramName = array_shift($paramNames);
                     $paramEvent = new AddParameterEvent(
-                            is_null($paramName)
-                                ? $key
-                                : $paramName->getName(),
-                            $this->stringifyArgument($param),
-                            ParameterKind::ARGUMENT);
+                        is_null($paramName)
+                            ? $key
+                            : $paramName->getName(),
+                        $this->stringifyArgument($param),
+                        ParameterKind::ARGUMENT);
                     $this->getLifecycle()->fire($paramEvent);
                 }
             }
@@ -349,7 +400,8 @@ class AllureCodeception extends Extension
     {
         $event = new TestCaseBrokenEvent();
         $e = $failEvent->getFail();
-        $message = $e->getMessage();
+        $this->AddAttachForFailTest($failEvent);
+        $message = mb_convert_encoding($e->getMessage(), 'UTF-8', 'auto');
         $this->getLifecycle()->fire($event->withException($e)->withMessage($message));
     }
 
@@ -360,7 +412,8 @@ class AllureCodeception extends Extension
     {
         $event = new TestCaseFailedEvent();
         $e = $failEvent->getFail();
-        $message = $e->getMessage();
+        $this->AddAttachForFailTest($failEvent);
+        $message = mb_convert_encoding($e->getMessage(), 'UTF-8', 'auto');
         $this->getLifecycle()->fire($event->withException($e)->withMessage($message));
     }
 
@@ -369,9 +422,11 @@ class AllureCodeception extends Extension
      */
     public function testIncomplete(FailEvent $failEvent)
     {
+
         $event = new TestCasePendingEvent();
         $e = $failEvent->getFail();
-        $message = $e->getMessage();
+        $this->AddAttachForFailTest($failEvent);
+        $message = mb_convert_encoding($e->getMessage(), 'UTF-8', 'auto');
         $this->getLifecycle()->fire($event->withException($e)->withMessage($message));
     }
 
@@ -380,62 +435,114 @@ class AllureCodeception extends Extension
      */
     public function testSkipped(FailEvent $failEvent)
     {
+
         $event = new TestCaseCanceledEvent();
         $e = $failEvent->getFail();
-        $message = $e->getMessage();
+        $message = mb_convert_encoding($e->getMessage(), 'UTF-8', 'auto');
         $this->getLifecycle()->fire($event->withException($e)->withMessage($message));
     }
 
     public function testEnd(TestEvent $testEvent)
     {
-        // attachments supported since Codeception 3.0
-        if (version_compare(Codecept::VERSION, '3.0.0') > -1 && $testEvent->getTest() instanceof Cest) {
-            $artifacts = $testEvent->getTest()->getMetadata()->getReports();
-            foreach ($artifacts as $name => $artifact) {
-                Allure::lifecycle()->fire(new AddAttachmentEvent($artifact, $name, null));
-            }
+        if ($this->lastRootStep) {
+            $this->getLifecycle()->fire(new StepFinishedEvent());
+            $this->lastRootStep = null;
         }
+        $this->stepNumber = 1;
         $this->getLifecycle()->fire(new TestCaseFinishedEvent());
     }
 
-    public function stepBefore(StepEvent $stepEvent)
+    public function stepBefore(StepEvent $e)
     {
-        $argumentsLength = $this->tryGetOption(ARGUMENTS_LENGTH, 200);
-        if($stepEvent){
-            $step = $stepEvent->getStep();
-            if ($step->getMetaStep()) {
-                $rootStepName = $step->getMetaStep()->toString($argumentsLength);
-                if (!$this->lastRootStep || $rootStepName !== $this->lastRootStep->getName()) {
-                    if ($this->lastRootStep && $rootStepName !== $this->lastRootStep->getName()) {
-                        $this->getLifecycle()->fire(new StepFinishedEvent());
-                    }
-                    $this->getLifecycle()->fire(new StepStartedEvent($rootStepName));
-                    $this->lastRootStep = $this->getLifecycle()->getStepStorage()->getLast();
+        $argumentsLength = $this->tryGetOption(ARGUMENTS_LENGTH, 300);
+
+        $step = $e->getStep();
+        if ($step->getMetaStep()) {
+            $rootStepName = $step->getMetaStep()->toString($argumentsLength);
+            if (!$this->lastRootStep || $rootStepName !== $this->lastRootStep->getName()) {
+                if ($this->lastRootStep && $rootStepName !== $this->lastRootStep->getName()) {
+                    $this->getLifecycle()->fire(new StepFinishedEvent());
                 }
-            } elseif (!$step->getMetaStep() && $this->lastRootStep) {
-                $this->getLifecycle()->fire(new StepFinishedEvent());
-                $this->lastRootStep = null;
+                $this->getLifecycle()->fire(new StepStartedEvent($rootStepName));
+                $this->lastRootStep = $this->getLifecycle()->getStepStorage()->getLast();
             }
-            $stepName = $step->toString($argumentsLength);
-            $this->getLifecycle()->fire(new StepStartedEvent($stepName));
+
+        } elseif (!$step->getMetaStep() && $this->lastRootStep) {
+            $this->getLifecycle()->fire(new StepFinishedEvent());
+            $this->lastRootStep = null;
         }
+        $stepName = $step->toString($argumentsLength);
+        $this->getLifecycle()->fire(new StepStartedEvent($stepName));
     }
 
-    public function stepAfter(StepEvent $stepEvent)
+    /**
+     * @param StepEvent $e
+     */
+    public function stepAfter(StepEvent $e)
     {
-        if ($stepEvent->getStep()->hasFailed()) {
-            $this->getLifecycle()->fire(new StepFailedEvent());
+        $step = $e->getStep();
+        if
+        (
+            in_array('stepScreenshot', $this->enabledAttach) &&
+            $this->hasModule('WebDriver') &&
+            !$step instanceof CommentStep &&
+            !$this->isNeedSkipScreenshotForStep($step)
+        ) {
+            $screenshotPath = $this->getOutputDirectory() . DIRECTORY_SEPARATOR . $this->testName . 'step' . $this->stepNumber . '-' . rand(1, 9999) . '.png';
+            $this->module->_saveScreenshot($screenshotPath);
+            $this->addAttachment($screenshotPath, 'step screenshot', 'image/png');
+            if (file_exists($screenshotPath)) {
+                unlink($screenshotPath);
+            }
         }
+        if (in_array('stepBrowserLog', $this->enabledAttach) && $this->hasModule('WebDriver')) {
+            $browserName = $this->module->webDriver->getCapabilities()->getBrowserName();
+            if ('firefox' !== $browserName) { // https://github.com/mozilla/geckodriver/issues/330
+                $browserLog = $this->module->webDriver->manage()->getLog('browser'); // type: client, driver,  browser, server
+                $browserLogAttachment = $this->formatBrowserLog($browserLog);
+                if ($browserLogAttachment) {
+                    $this->addAttachment($browserLogAttachment, 'step browser error', 'text/html');
+
+                }
+            }
+        }
+        if (in_array('PhpBrowserLog', $this->enabledAttach) && $this->hasModule('PhpBrowser') && !is_null($this->module->client) && !$this->module->client->getHistory()->isEmpty()) {
+            $requestObject = @$this->module->client->getRequest();
+            $responseObject = @$this->module->client->getResponse();
+            $lastInnerBrowserResponse = ['requestObject' => $requestObject, 'responseObject' => $responseObject];
+            if ($requestObject && $responseObject && $lastInnerBrowserResponse !== $this->previousInnerBrowserResponse) {
+                $this->previousInnerBrowserResponse = $lastInnerBrowserResponse;
+                $responseStatusCode = method_exists($responseObject, 'getStatusCode') ? $responseObject->getStatusCode() : false;
+                if (method_exists($responseObject, 'getStatusCode')) {
+                    $responseStatusCode = $responseObject->getStatusCode();
+                } elseif (method_exists($responseObject, 'getStatus')) {
+                    $responseStatusCode = $responseObject->getStatus();
+                } else {
+                    $responseStatusCode = 'Error. Method "getStatusCode" and "getStatus" not exist!';
+                }
+                $this->addAttachment(require('InnerBrowserAttachTemplate.php'), 'Response (' . $responseStatusCode . ')', 'text/html');
+            }
+        }
+        if ($step->hasFailed()) {
+            $this->getLifecycle()->getStepStorage()->getLast()->setStatus(Status::FAILED);
+            if ($this->lastRootStep) {
+                $this->lastRootStep->setStatus(Status::FAILED);
+            }
+        }
+        if ($this->lastRootStep && !$step->getMetaStep()) {
+            $this->getLifecycle()->fire(new StepFinishedEvent());
+            $this->lastRootStep = null;
+        }
+        $this->stepNumber++;
         $this->getLifecycle()->fire(new StepFinishedEvent());
     }
-
 
     /**
      * @return Allure
      */
     public function getLifecycle()
     {
-        if (!isset($this->lifecycle)){
+        if (!isset($this->lifecycle)) {
             $this->lifecycle = Allure::lifecycle();
         }
         return $this->lifecycle;
@@ -456,20 +563,20 @@ class AllureCodeception extends Extension
         $tokens = token_get_all($test->getSourceCode());
         $comments = array();
         $annotations = [];
-        foreach($tokens as $token) {
-            if($token[0] == T_DOC_COMMENT || $token[0] == T_COMMENT) {
+        foreach ($tokens as $token) {
+            if ($token[0] == T_DOC_COMMENT || $token[0] == T_COMMENT) {
                 $comments[] = $token[1];
             }
         }
-        foreach($comments as $comment) {
-            $lines = preg_split ('/$\R?^/m', $comment);
-            foreach($lines as $line) {
+        foreach ($comments as $comment) {
+            $lines = preg_split('/$\R?^/m', $comment);
+            foreach ($lines as $line) {
                 $output = [];
                 if (preg_match('/\*\s\@(.*)\((.*)\)/', $line, $output) > 0) {
                     if ($output[1] == "Features") {
                         $feature = new Features();
                         $features = $this->splitAnnotationContent($output[2]);
-                        foreach($features as $featureName) {
+                        foreach ($features as $featureName) {
                             $feature->featureNames[] = $featureName;
                         }
                         $annotations[get_class($feature)] = $feature;
@@ -486,19 +593,19 @@ class AllureCodeception extends Extension
                     } else if ($output[1] == 'Stories') {
                         $stories = $this->splitAnnotationContent($output[2]);
                         $story = new Stories();
-                        foreach($stories as $storyName) {
+                        foreach ($stories as $storyName) {
                             $story->stories[] = $storyName;
                         }
                         $annotations[get_class($story)] = $story;
                     } else if ($output[1] == 'Issues') {
                         $issues = $this->splitAnnotationContent($output[2]);
                         $issue = new Issues();
-                        foreach($issues as $issueName) {
+                        foreach ($issues as $issueName) {
                             $issue->issueKeys[] = $issueName;
                         }
                         $annotations[get_class($issue)] = $issue;
                     } else {
-                        Debug::debug("Tag not detected: ".$output[1]);
+                        Debug::debug("Tag not detected: " . $output[1]);
                     }
                 }
             }
@@ -534,7 +641,7 @@ class AllureCodeception extends Extension
             foreach ($argument as $key => $value) {
                 if (is_object($value)) {
                     $argument[$key] = $this->getClassName($value);
-}
+                }
             }
         } elseif (is_object($argument)) {
             if (method_exists($argument, '__toString')) {
@@ -563,5 +670,58 @@ class AllureCodeception extends Extension
     protected function formatClassName($classname)
     {
         return trim($classname, "\\");
+    }
+
+    /**
+     * @param Step $step
+     *
+     * @return bool
+     */
+    protected function isNeedSkipScreenshotForStep($step)
+    {
+        foreach ($this->tryGetOption(STEP_SCREENSHOT_IGNORED_PARAMETER, ['grab*', '*cookie', '*api*']) as $stepPattern) {
+            $stepRegexp = '/^' . str_replace('*', '.*?', $stepPattern) . '$/i';
+            if (preg_match($stepRegexp, $step->getAction())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    protected function AddAttachForFailTest($fail)
+    {
+        if (
+            in_array('failedStepPageSource', $this->enabledAttach) &&
+            (
+                $this->hasModule('WebDriver') ||
+                $this->hasModule('PhpBrowser') &&
+                !is_null($this->module->client) &&
+                !is_null($this->module->client->getInternalResponse())
+            )
+        ) {
+            $htmlPageSnapshotPath = $this->getOutputDirectory() . DIRECTORY_SEPARATOR . $this->testName . '-' . rand(1, 99999) . '.html';
+            $this->module->_savePageSource($htmlPageSnapshotPath);
+            $this->addAttachment($htmlPageSnapshotPath, 'html snapshot', 'text/html');
+            if (file_exists($htmlPageSnapshotPath)) {
+                unlink($htmlPageSnapshotPath);
+            }
+        }
+        if (in_array('visualceptionScreenshot', $this->enabledAttach) && $fail->getFail() instanceof \Codeception\Module\ImageDeviationException) {
+            $testStorage = $this->getLifecycle()->getTestCaseStorage()->get();
+            $testStorage->addAttachment(new Attachment('diff', $fail->getFail()->getDeviationImage(), 'image/png'));
+            $testStorage->addAttachment(new Attachment('actual', $fail->getFail()->getCurrentImage(), 'image/png'));
+            $testStorage->addAttachment(new Attachment('expected', $fail->getFail()->getExpectedImage(), 'image/png'));
+            $testStorage->addLabel(new Label('testType', 'screenshotDiff'));
+        }
+    }
+
+    protected function formatBrowserLog(array $log)
+    {
+        if (!empty($log) && array_key_exists('message', $log[0])) {
+            return '<ul><li>' . implode("<br/><li>", array_column($log, 'message')) . '</ul>';
+        } else {
+            return false;
+        }
     }
 }
