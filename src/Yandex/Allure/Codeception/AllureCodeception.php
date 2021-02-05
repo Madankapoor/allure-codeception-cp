@@ -15,7 +15,6 @@ use Codeception\Test\Cest;
 use Codeception\Test\Gherkin;
 use Codeception\Util\Debug;
 use Codeception\Util\Locator;
-use Ramsey\Uuid\Uuid;
 use Symfony\Component\Filesystem\Filesystem;
 use Symfony\Component\Finder\Finder;
 use Yandex\Allure\Adapter\Allure;
@@ -222,7 +221,7 @@ class AllureCodeception extends Extension
     {
         $suite = $suiteEvent->getSuite();
         $suiteName = $suite->getName();
-        $event = new TestSuiteStartedEvent($suiteName . ' ' . Uuid::uuid4()->toString());
+        $event = new TestSuiteStartedEvent($suiteName);
         if (class_exists($suiteName, false)) {
             $annotationManager = new Annotation\AnnotationManager(
                 Annotation\AnnotationProvider::getClassAnnotations($suiteName)
@@ -242,7 +241,8 @@ class AllureCodeception extends Extension
     private function buildTestName($test) {
         $testName = $test->getName();
         if ($test instanceof Cest) {
-            $testFullName = get_class($test->getTestClass()) . '::' . $testName;
+            $testName =  get_class($test->getTestClass()) . '::' . $testName;
+            $testFullName = $test->getMetadata()->getFilename() . ':' . $testName;
             if(isset($this->testInvocations[$testFullName])) {
                 $this->testInvocations[$testFullName]++;
             } else {
@@ -253,7 +253,7 @@ class AllureCodeception extends Extension
                 $testName .= ' with data set #' . $this->testInvocations[$testFullName];
             }
         } else if($test instanceof Gherkin) {
-            $testName = $test->getMetadata()->getFeature();
+            $testName = $test->getMetadata()->getFilename() .':'. $test->getMetadata()->getFeature() ;
         }
         return $testName;
     }
