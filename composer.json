@@ -21,30 +21,9 @@
         "symfony/filesystem": ">=2.6",
         "symfony/finder": ">=2.6"
     },
-    "require-dev": {
-        "ext-dom": "*",
-        "phpunit/phpunit": "^7.2 | ^8 | ^9"
-    },
     "autoload": {
         "psr-0": {
             "Yandex": "src/"
         }
-    },
-    "autoload-dev": {
-        "psr-4": {
-            "Yandex\\Allure\\Codeception\\": [
-                "test/report/",
-                "test/unit/"
-            ]
-        }
-    },
-    "scripts": {
-        "test-report": [
-            "vendor/bin/codecept run --no-exit --report",
-            "vendor/bin/phpunit --testsuite=report"
-        ],
-        "test": [
-            "@test-report"
-        ]
     }
 }
