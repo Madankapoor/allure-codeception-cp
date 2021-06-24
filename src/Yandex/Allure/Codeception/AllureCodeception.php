@@ -253,7 +253,7 @@ class AllureCodeception extends Extension
                 $testName .= ' with data set #' . $this->testInvocations[$testFullName];
             }
         } else if($test instanceof Gherkin) {
-            $testName = $test->getScenarioNode()->getTitle();
+            $testName = $test->getMetadata()->getFilename() . ':' . $test->getScenarioNode()->getTitle();
         }
         return $testName;
     }
