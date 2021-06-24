@@ -253,7 +253,7 @@ class AllureCodeception extends Extension
                 $testName .= ' with data set #' . $this->testInvocations[$testFullName];
             }
         } else if($test instanceof Gherkin) {
-            $testName = $test->getMetadata()->getFilename() .':'. $test->getMetadata()->getFeature() ;
+            $testName = $test->getScenarioNode()->getTitle();
         }
         return $testName;
     }
@@ -391,6 +391,11 @@ class AllureCodeception extends Extension
     {
         // attachments supported since Codeception 3.0
         if (version_compare(Codecept::VERSION, '3.0.0') > -1 && $testEvent->getTest() instanceof Cest) {
+            $artifacts = $testEvent->getTest()->getMetadata()->getReports();
+            foreach ($artifacts as $name => $artifact) {
+                Allure::lifecycle()->fire(new AddAttachmentEvent($artifact, $name, null));
+            }
+        } elseif (version_compare(Codecept::VERSION, '3.0.0') > -1 && $testEvent->getTest() instanceof Gherkin) {
             $artifacts = $testEvent->getTest()->getMetadata()->getReports();
             foreach ($artifacts as $name => $artifact) {
                 Allure::lifecycle()->fire(new AddAttachmentEvent($artifact, $name, null));
@@ -535,7 +540,7 @@ class AllureCodeception extends Extension
             foreach ($argument as $key => $value) {
                 if (is_object($value)) {
                     $argument[$key] = $this->getClassName($value);
-}
+                }
             }
         } elseif (is_object($argument)) {
             if (method_exists($argument, '__toString')) {
