@@ -86,7 +86,7 @@ class AllureCodeception extends Extension
         'coversDefaultClass', 'coversNothing', 'dataProvider', 'depends', 'expectedException',
         'expectedExceptionCode', 'expectedExceptionMessage', 'group', 'large', 'medium',
         'preserveGlobalState', 'requires', 'runTestsInSeparateProcesses', 'runInSeparateProcess',
-        'small', 'test', 'testdox', 'ticket', 'uses',
+        'small', 'test', 'testdox', 'ticket', 'uses', 'testcase', 'skip'
     ];
 
     /**
@@ -253,7 +253,7 @@ class AllureCodeception extends Extension
                 $testName .= ' with data set #' . $this->testInvocations[$testFullName];
             }
         } else if($test instanceof Gherkin) {
-            $testName = $test->getMetadata()->getFilename() . ':' . $test->getScenarioNode()->getTitle();
+            $testName = $test->getMetadata()->getFilename() . ' Scenario: ' . $test->getScenarioNode()->getTitle();
         }
         return $testName;
     }
